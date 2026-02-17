@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<title>Tropimon — Notifications Live</title>
+<link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=VT323:wght@400&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/socket.io-client@4/dist/socket.io.min.js"></script>
+<style>
+*, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
+:root {
+  --pk-pink:   #e060c8;
+  --pk-purple: #7030b8;
+  --teal:      #00e8cc;
+  --alert-c:   #ff69b4;
+}
+body {
+  width: 1920px; height: 1080px;
+  overflow: hidden;
+  background: transparent;
+  font-family: 'Press Start 2P', monospace;
+}
+
+/* ═══ FLASH ═══ */
+#alert-flash {
+  position: absolute; inset: 0; z-index: 48;
+  pointer-events: none; opacity: 0;
+}
+@keyframes bigFlash { 0%{opacity:.8} 100%{opacity:0} }
+
+/* ═══ CONTENEUR ALERTE ═══ */
+#alert-wrap {
+  position: absolute;
+  top: 18px; left: 50%;
+  transform: translateX(-50%);
+  z-index: 50;
+  pointer-events: none;
+  display: flex; flex-direction: column; align-items: center;
+}
+
+/* ═══ CARTE ═══ */
+.alert-card {
+  position: relative;
+  display: flex; align-items: center;
+  min-width: 480px;
+  background: linear-gradient(135deg, rgba(10,0,28,.97), rgba(20,4,50,.96), rgba(10,0,28,.97));
+  border: 2px solid var(--alert-c, var(--pk-pink));
+  box-shadow:
+    0 0 0 1px rgba(255,105,180,.2),
+    0 0 25px var(--alert-glow, rgba(255,80,200,.4)),
+    0 0 60px var(--alert-glow2, rgba(200,60,255,.18)),
+    inset 0 0 25px rgba(100,0,200,.1);
+  opacity: 0;
+  animation: cardIn .55s cubic-bezier(.22,1.5,.6,1) forwards;
+  overflow: hidden;
+}
+@keyframes cardIn {
+  0%  {opacity:0;transform:scale(.3) rotate(-8deg) translateY(80px);filter:brightness(5)}
+  50% {filter:brightness(1.5)}
+  100%{opacity:1;transform:scale(1) rotate(0deg) translateY(0);filter:brightness(1)}
+}
+.alert-card.out { animation: cardOut .55s cubic-bezier(.6,0,.8,1) forwards; }
+@keyframes cardOut {
+  0%  {opacity:1;transform:scale(1)}
+  100%{opacity:0;transform:scale(.85) translateY(-60px);filter:blur(8px)}
+}
+
+/* Ligne de scan */
+.a-scan { position:absolute; top:0; left:0; right:0; height:3px; animation:aScan 1.4s linear infinite; z-index:10; }
+@keyframes aScan { 0%{transform:translateY(0)} 100%{transform:translateY(100px)} }
+
+/* Coins cyber */
+.a-corner { position:absolute; width:20px; height:20px; border-color:var(--teal); border-style:solid; }
+.a-corner.tl { top:-2px; left:-2px; border-width:3px 0 0 3px; }
+.a-corner.tr { top:-2px; right:-2px; border-width:3px 3px 0 0; }
+.a-corner.bl { bottom:-2px; left:-2px; border-width:0 0 3px 3px; }
+.a-corner.br { bottom:-2px; right:-2px; border-width:0 3px 3px 0; }
+
+/* Bande gauche */
+.a-side {
+  width:8px; align-self:stretch; flex-shrink:0;
+  background:linear-gradient(180deg,transparent,var(--alert-c,var(--pk-pink)),var(--alert-c,var(--pk-pink)),transparent);
+  position:relative;
+}
+.a-side::after { content:''; position:absolute; inset:0; background:inherit; filter:blur(6px); opacity:.8; }
+
+/* Master Ball */
+.a-ball-zone { padding:10px 14px; display:flex; align-items:center; justify-content:center; flex-shrink:0; }
+.mb {
+  --d: calc(var(--r,30px)*2);
+  position:relative; width:var(--d); height:var(--d);
+  border-radius:50%; flex-shrink:0; overflow:hidden;
+  background:
+    radial-gradient(ellipse 45% 28% at 32% 24%, rgba(255,255,255,.7) 0%, transparent 100%),
+    linear-gradient(180deg, #d040c0 0%, #9020a0 48%, #060610 48%, #060610 55%, #1a004a 55%, #0d0028 100%);
+  box-shadow: 0 0 0 calc(var(--r,30px)*.08) #060610, 0 4px 20px rgba(160,40,220,.6);
+}
+.mb::before {
+  content:''; position:absolute; top:50%; left:50%;
+  transform:translate(-50%,-50%);
+  width:24%; height:24%; border-radius:50%;
+  background:radial-gradient(ellipse 55% 45% at 38% 32%, #fff 0%, #ddddf8 50%, #a0a0d8 100%);
+  box-shadow:0 0 0 calc(var(--r,30px)*.07) #060610, 0 0 calc(var(--r,30px)*.4) rgba(200,160,255,.9);
+  z-index:4;
+}
+.mb::after {
+  content:''; position:absolute; top:7%; left:14%;
+  width:30%; height:18%; border-radius:50%;
+  background:radial-gradient(ellipse,rgba(255,255,255,.82) 0%,transparent 100%);
+  transform:rotate(-25deg); z-index:5;
+}
+@keyframes mbSpin { to{transform:rotate(360deg)} }
+.a-ball-spin { animation: mbSpin .9s linear infinite, alertBallPulse 1s ease-in-out 4 .3s; }
+@keyframes alertBallPulse {
+  0%  {filter:drop-shadow(0 0 4px var(--alert-c,#ff69b4))}
+  50% {filter:drop-shadow(0 0 20px var(--alert-c,#ff69b4)) drop-shadow(0 0 40px white) brightness(1.3)}
+  100%{filter:drop-shadow(0 0 4px var(--alert-c,#ff69b4))}
+}
+
+/* Séparateur */
+.a-sep {
+  width:2px; align-self:stretch; flex-shrink:0;
+  background:linear-gradient(180deg,transparent,var(--alert-c,var(--pk-pink)) 30%,var(--alert-c,var(--pk-pink)) 70%,transparent);
+  opacity:.5;
+}
+
+/* Texte */
+.a-text { padding:10px 18px 10px 14px; flex:1; }
+.a-type {
+  font-size:7px; letter-spacing:2px;
+  color:var(--alert-c,var(--pk-pink));
+  text-shadow:0 0 8px var(--alert-c,var(--pk-pink));
+  margin-bottom:5px;
+  animation:textSlide .5s cubic-bezier(.34,1.56,.64,1) .15s both;
+}
+@keyframes textSlide{from{opacity:0;transform:translateX(-25px)}to{opacity:1;transform:translateX(0)}}
+.a-name {
+  font-size:15px; color:white;
+  text-shadow:0 0 14px white, 0 0 28px var(--alert-c,var(--pk-pink));
+  margin-bottom:4px;
+  animation:namePop .6s cubic-bezier(.34,1.56,.64,1) .28s both;
+}
+@keyframes namePop{from{opacity:0;transform:scale(.4) translateY(10px)}to{opacity:1;transform:scale(1) translateY(0)}}
+.a-msg {
+  font-family:'VT323',monospace; font-size:20px;
+  color:rgba(255,255,255,.85);
+  animation:msgFade .45s ease-out .45s both;
+}
+@keyframes msgFade{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+
+/* Barre HP durée */
+.a-hp-wrap {
+  width:100%; height:6px;
+  background:rgba(255,255,255,.07);
+  border:1px solid rgba(255,255,255,.12);
+  position:relative; overflow:hidden;
+}
+.a-hp-bar {
+  height:100%;
+  background:linear-gradient(90deg,var(--alert-c,var(--pk-pink)),white,var(--alert-c,var(--pk-pink)));
+  background-size:200%;
+  animation:hpBarSlide 5.5s linear forwards, hpBarShim 1s ease-in-out infinite;
+  transform-origin:left;
+}
+@keyframes hpBarSlide{from{width:100%}to{width:0%}}
+@keyframes hpBarShim{0%,100%{background-position:0%}50%{background-position:100%}}
+
+/* Particules */
+.a-particle {
+  position:absolute; border-radius:50%; pointer-events:none;
+  animation:partFly ease-out forwards;
+}
+@keyframes partFly{
+  0%  {transform:translate(0,0) scale(1.2);opacity:1}
+  100%{transform:translate(var(--px),var(--py)) scale(0);opacity:0}
+}
+</style>
+</head>
+<body>
+
+<div id="alert-flash"></div>
+<div id="alert-wrap"></div>
+
+<script>
+const ALERT_DEFS = {
+  follow: {
+    label: '⭐ NOUVEAU DRESSEUR ⭐',
+    color: '#ff69b4',
+    glow:  'rgba(255,80,180,.55)',
+    glow2: 'rgba(200,40,255,.25)',
+    msg:   'Un dresseur a rejoint l\'aventure ! 🌴',
+    scanC: 'linear-gradient(90deg,transparent,#ff69b4cc,#ff69b4,transparent)',
+  },
+  sub: {
+    label: '💥 ATTAQUE CRITIQUE ! 💥',
+    color: '#ff6b35',
+    glow:  'rgba(255,80,40,.55)',
+    glow2: 'rgba(255,140,0,.25)',
+    msg:   'C\'est super efficace ! 🔥🔥🔥',
+    scanC: 'linear-gradient(90deg,transparent,#ff6b35cc,#ff8800,transparent)',
+  },
+  don: {
+    label: '✨ DON REÇU ✨',
+    color: '#ffd700',
+    glow:  'rgba(255,200,0,.55)',
+    glow2: 'rgba(255,120,0,.25)',
+    msg:   'Merci pour le don ! 💛',
+    scanC: 'linear-gradient(90deg,transparent,#ffd700cc,#ffee44,transparent)',
+  },
+  challenger: {
+    label: '⚡ NOUVEAU CHALLENGER ⚡',
+    color: '#a0f0ff',
+    glow:  'rgba(80,200,255,.5)',
+    glow2: 'rgba(0,120,255,.25)',
+    msg:   'Un challenger approche... 👊',
+    scanC: 'linear-gradient(90deg,transparent,#a0f0ffcc,#44ddff,transparent)',
+  },
+};
+
+const alertWrap  = document.getElementById('alert-wrap');
+const alertFlash = document.getElementById('alert-flash');
+let alertQueue = [], alertBusy = false;
+
+function showAlert(type, name, customMsg){
+  alertQueue.push({type, name, customMsg});
+  if(!alertBusy) processQueue();
+}
+
+function processQueue(){
+  if(!alertQueue.length){ alertBusy=false; return; }
+  alertBusy = true;
+  const {type, name, customMsg} = alertQueue.shift();
+  const def = ALERT_DEFS[type] || ALERT_DEFS.follow;
+
+  alertFlash.style.background = `radial-gradient(ellipse at 50% 60%, ${def.color}44 0%, transparent 70%)`;
+  alertFlash.style.animation = 'bigFlash .7s ease-out forwards';
+  setTimeout(()=>alertFlash.style.animation='none', 800);
+
+  alertWrap.innerHTML = '';
+  const card = document.createElement('div'); card.className = 'alert-card';
+  card.style.setProperty('--alert-c', def.color);
+  card.style.setProperty('--alert-glow', def.glow);
+  card.style.setProperty('--alert-glow2', def.glow2);
+
+  ['tl','tr','bl','br'].forEach(pos=>{
+    const c=document.createElement('div'); c.className=`a-corner ${pos}`; card.appendChild(c);
+  });
+
+  const scan=document.createElement('div'); scan.className='a-scan';
+  scan.style.background=def.scanC; card.appendChild(scan);
+
+  const side=document.createElement('div'); side.className='a-side'; card.appendChild(side);
+
+  const ballZone=document.createElement('div'); ballZone.className='a-ball-zone';
+  ballZone.innerHTML=`<div class="a-ball-spin"><div class="mb" style="--r:36px;"></div></div>`;
+  card.appendChild(ballZone);
+
+  const sep=document.createElement('div'); sep.className='a-sep'; card.appendChild(sep);
+
+  const txt=document.createElement('div'); txt.className='a-text';
+  txt.innerHTML=`
+    <div class="a-type" style="color:${def.color};text-shadow:0 0 10px ${def.color}">${def.label}</div>
+    <div class="a-name">${name}</div>
+    <div class="a-msg">${customMsg || def.msg}</div>
+  `;
+  card.appendChild(txt);
+
+  for(let i=0;i<28;i++){
+    const p=document.createElement('div'); p.className='a-particle';
+    const ang=Math.random()*360, d=80+Math.random()*200, sz=4+Math.random()*8;
+    p.style.cssText=`width:${sz}px;height:${sz}px;background:${[def.color,'#fff','#ffd700'][i%3]};box-shadow:0 0 ${sz*2}px ${def.color};left:${180+Math.random()*50}px;top:${35+Math.random()*30}px;--px:${Math.cos(ang*Math.PI/180)*d}px;--py:${Math.sin(ang*Math.PI/180)*d}px;animation-duration:${.7+Math.random()*.9}s;animation-delay:.1s;`;
+    card.appendChild(p);
+  }
+
+  alertWrap.appendChild(card);
+
+  const hpW=document.createElement('div'); hpW.className='a-hp-wrap';
+  const hpB=document.createElement('div'); hpB.className='a-hp-bar';
+  hpB.style.setProperty('--alert-c', def.color);
+  hpW.appendChild(hpB); alertWrap.appendChild(hpW);
+
+  setTimeout(()=>{
+    card.classList.add('out');
+    hpW.style.transition='opacity .5s'; hpW.style.opacity='0';
+    setTimeout(()=>{ alertWrap.innerHTML=''; setTimeout(processQueue,500); },550);
+  },5800);
+}
+
+/* ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   🔌 STREAMLABS SOCKET API — Connexion temps réel
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */
+const SOCKET_TOKEN = '8EFAA513AD31ACD74006F3E2434201600C552862DA7EB05EBF9EA8CC5D00BF5208B643B9F001F4E96CC79A47AB47A18BD487A269F181F19A1B9F8F7323A1CCDBE0A916FD485D460749D1CB8CC22F0E39E38310327F140FB16C69F5612D10623F9BDFA8D69BC49728ADF1620B9A9F5A92ACD1F2C011CAE7A39717B9A53C';
+
+const socket = io('https://sockets.streamlabs.com', {
+  transports: ['websocket'],
+  query: { token: SOCKET_TOKEN }
+});
+
+socket.on('connect', () => {
+  console.log('✅ Connecté à Streamlabs Socket !');
+});
+
+socket.on('event', (data) => {
+  console.log('EVENT:', JSON.stringify(data));
+  if (!data || !data.type) return;
+
+  const ev = data.message && data.message[0] ? data.message[0] : {};
+  const name = ev.name || ev.gifter || 'Inconnu';
+
+  if (data.type === 'follow') {
+    showAlert('follow', name, "Un dresseur a rejoint l'aventure ! 🌴");
+  }
+
+  if (data.type === 'subscription') {
+    const months = ev.months > 1 ? 'Re-sub x' + ev.months + ' ! 🔥' : "C'est super efficace ! 🔥🔥🔥";
+    const msg = ev.message ? '"' + ev.message + '"' : months;
+    showAlert('sub', name, msg);
+  }
+
+  if (data.type === 'subgift') {
+    showAlert('sub', ev.gifter || name, 'Cadeau de ' + (ev.gifter || name) + ' ! 🎁');
+  }
+
+  if (data.type === 'bits') {
+    showAlert('don', name, ev.amount + ' bits ! 💛');
+  }
+
+  if (data.type === 'donation') {
+    const montant = ev.amount ? ev.formatted_amount || ev.amount + '€' : '';
+    showAlert('don', name, montant + (ev.message ? ' — ' + ev.message : ' Merci ! 💛'));
+  }
+
+  if (data.type === 'raid') {
+    showAlert('challenger', name, 'Raid avec ' + (ev.raiders || ev.viewers || '?') + ' viewers ! ⚡');
+  }
+
+  if (data.type === 'host') {
+    showAlert('challenger', name, 'Host avec ' + (ev.viewers || '?') + ' viewers ! 👁️');
+  }
+});
+
+socket.on('disconnect', () => {
+  console.log('⚠️ Déconnecté de Streamlabs');
+});
+</script>
+</body>
+</html>
